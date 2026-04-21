@@ -1,0 +1,12 @@
+inside file installation.txt, I have documented zephyr installation.
+check each step and if anything wrong correct it.
+I want to install everything inside python venv.
+do deep understanding and check current .mg24 venv 
+
+
+currently i am using below openocd path to program xiao_mg24
+export OPENOCD_MG24="/Users/yogesh/Library/Arduino15/packages/SiliconLabs/tools/openocd/0.12.0-arduino1-static/bin/openocd"
+export OPENOCD_SCRIPTS_MG24="/Users/yogesh/Library/Arduino15/packages/SiliconLabs/tools/openocd/0.12.0-arduino1-static/share/openocd/scripts"
+which is depend on arduino IDE,
+can you check zephyr native way to flash or program xiao_mg24.
+do deep research and refer zephyr sdk 1.0.1

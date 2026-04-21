@@ -1,0 +1,45 @@
+1. install system prerequisites (outside the venv)
+    a. install homebrew
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    b. install required system dependencies
+        brew install cmake ninja gperf ccache qemu dtc libmagic
+    c. ensure Python 3 is available
+        # use python.org installer (recommended, matches current .mg24 venv)
+        # or: brew install python3
+
+2. create python venv
+    a. python3 -m venv .mg24
+
+3. activate venv
+    a. source .mg24/bin/activate
+    # every step below runs INSIDE the activated venv
+
+4. install zephyrrtos
+    a. install west (python package, installed into the venv)
+        pip install west
+
+    b. initialise the zephyr workspace
+        west init ~/projects/temp/xiao_mg24/zephyrproject
+        cd ~/projects/temp/xiao_mg24/zephyrproject
+        west update
+        west zephyr-export
+
+    c. install Zephyr's Python dependencies into the venv
+        west packages pip --install
+
+    d. install the Zephyr SDK inside the venv
+        west sdk install -b "$VIRTUAL_ENV/opt"
+        # installs to .mg24/opt/zephyr-sdk-<version>
+
+    e. append env_script.txt to the venv activate script
+        cat ~/projects/temp/xiao_mg24/learn_mg24/documents/env_script.txt \
+            >> ~/projects/temp/xiao_mg24/.mg24/bin/activate
+        # reload so the new exports + helper functions are available
+        deactivate && source ~/projects/temp/xiao_mg24/.mg24/bin/activate
+
+    f. build the blinky sample
+        cd ~/projects/temp/xiao_mg24/zephyrproject/zephyr/samples/basic/blinky
+        xiao_mg24_build
+
+    g. flash the board (XIAO MG24 connected via debugger)
+        xiao_mg24_flash

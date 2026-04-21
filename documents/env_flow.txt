@@ -1,0 +1,215 @@
+================================================================
+env_script.txt — flow & reference
+================================================================
+
+PURPOSE
+-------
+env_script.txt is appended to the .mg24 Python venv's activate
+script. Every time the venv is activated, it:
+
+  * exports a few well-known paths (workspace, fallback openocd)
+  * defines shell helpers that wrap `west` for the XIAO MG24 board
+
+Source of truth:
+    learn_mg24/documents/env_script.txt
+Installed copy (loaded on `source .mg24/bin/activate`):
+    .mg24/bin/activate        (contents appended verbatim)
+
+Keep them in sync. If you edit env_script.txt, also re-apply the
+changes into .mg24/bin/activate (or re-append the whole file).
+
+
+================================================================
+1. ENVIRONMENT VARIABLES
+================================================================
+
+ZEPHYR_WORKSPACE_MG24
+    Absolute path to the Zephyr west workspace initialised at
+    step 4b of installation.txt.
+    Value: /Users/yogesh/projects/temp/xiao_mg24/zephyrproject
+    Used by: westz() — it `cd`s here before every west call.
+
+OPENOCD_MG24
+OPENOCD_SCRIPTS_MG24
+    Paths into Arduino's Silicon Labs tools bundle. Kept only
+    because stock OpenOCD / the Zephyr-SDK build do not ship the
+    MG24 flash support; the Arduino-patched fork does.
+    Used exclusively by the *_openocd fallback helpers. The
+    default pyocd path ignores them.
+
+MG24_BOARD_DEFAULT
+    Board target name passed to `west build -b`. Override by
+    passing a second argument to xiao_mg24_build / _flash.
+    Value: xiao_mg24
+
+
+================================================================
+2. HELPER: westz
+================================================================
+
+westz <west-args...>
+    Thin wrapper that runs `west` from inside the workspace:
+        ( cd "$ZEPHYR_WORKSPACE_MG24" && west "$@" )
+    Runs in a subshell so your current $PWD is not affected.
+    Every other helper in this file routes through westz.
+
+
+================================================================
+3. APPLICATION HELPERS
+================================================================
+
+-----------------------------------------------------------------
+xiao_mg24_create_app <app_name> [parent_dir]
+-----------------------------------------------------------------
+Scaffolds a bare-minimum standalone Zephyr application.
+
+Arguments:
+    app_name    (required) project name and directory name
+    parent_dir  (optional) where to create it; defaults to $PWD
+
+Creates:
+    <parent_dir>/<app_name>/
+    ├── .gitignore         # build*/
+    ├── CMakeLists.txt     # project(<app_name>), one source file
+    ├── prj.conf           # empty (no features enabled)
+    └── src/main.c         # int main(void) { return 0; }
+
+Guardrails:
+    * refuses to overwrite an existing path
+    * prints the next commands (build + flash)
+
+Build the result from inside the new dir with xiao_mg24_build.
+
+-----------------------------------------------------------------
+xiao_mg24_build [src] [board]
+-----------------------------------------------------------------
+Clean sysbuild of an app.
+
+Arguments:
+    src     (optional) application directory; defaults to $PWD
+    board   (optional) board target;           defaults to $MG24_BOARD_DEFAULT
+
+Runs, from the workspace:
+    west build -p always --sysbuild -b <board> -s <src> -d <src>/build-<board>
+
+Notes:
+    * `-p always` forces a pristine build every time (safe default
+      while iterating on Kconfig / devicetree overlays).
+    * `--sysbuild` produces MCUboot + app images, even if the
+      project only has a single app — required because
+      xiao_mg24_flash_all expects the sysbuild layout.
+    * Build dir is ALWAYS `<src>/build-<board>`; the flash
+      helpers assume this convention.
+
+
+================================================================
+4. FLASH HELPERS
+================================================================
+
+Runner selection:
+    Default:  pyocd   — native Zephyr, no external tooling,
+                        uses the onboard SAMD11 CMSIS-DAP probe.
+    Fallback: openocd — Arduino-patched OpenOCD, uses
+                        $OPENOCD_MG24 / $OPENOCD_SCRIPTS_MG24.
+
+Before first pyocd flash (one-time):
+    pyocd pack install EFR32MG24
+
+-----------------------------------------------------------------
+xiao_mg24_flash [src] [board]              # pyocd (default)
+xiao_mg24_flash_openocd [src] [board]      # openocd fallback
+-----------------------------------------------------------------
+Flashes the application image only (zephyr.hex from the build).
+
+Arguments are the same as xiao_mg24_build. Looks for
+    <src>/build-<board>
+and fails early if it doesn't exist.
+
+Internally:
+    westz flash -d <builddir> -r pyocd
+    # or:
+    westz flash -d <builddir> -r openocd -- \
+        --openocd <$OPENOCD_MG24> --openocd-search <$OPENOCD_SCRIPTS_MG24>
+
+-----------------------------------------------------------------
+xiao_mg24_flash_all [src] [board]          # pyocd (default)
+xiao_mg24_flash_all_openocd [src] [board]  # openocd fallback
+-----------------------------------------------------------------
+Factory flash: MCUboot + application together. Needed after
+a wipe, a bootloader change, or when recovering a board.
+
+Strategy:
+    1. Detect the application sysbuild domain (anything under
+       <builddir>/ that isn't mcuboot/zephyr/sysbuild/modules/…
+       and that contains a zephyr/ subfolder). This is done by
+       xiao_mg24_detect_app_domain — the single helper used only
+       by the flash_all functions.
+    2. Look for a combined hex file, in this priority order:
+           <builddir>/zephyr/merged.hex
+           <builddir>/<app_domain>/zephyr/merged.hex
+           <builddir>/mcuboot/zephyr/merged.hex
+       If found, flash that single file with `west flash --hex-file`.
+    3. If no merged.hex exists, flash in two steps:
+           west flash --domain mcuboot
+           west flash --domain <app_domain>
+
+-----------------------------------------------------------------
+xiao_mg24_detect_app_domain <builddir>     # internal
+-----------------------------------------------------------------
+Returns the name of the sysbuild sub-directory that holds the
+application image (e.g. `blinky` for samples/basic/blinky).
+Used only by xiao_mg24_flash_all*; no need to call directly.
+
+
+================================================================
+5. TYPICAL WORKFLOWS
+================================================================
+
+New project, build and run:
+    source .mg24/bin/activate
+    cd ~/projects/temp/xiao_mg24/learn_mg24
+    xiao_mg24_create_app hello_app
+    cd hello_app
+    xiao_mg24_build
+    xiao_mg24_flash
+
+Iterate on an existing sample:
+    cd ~/projects/temp/xiao_mg24/zephyrproject/zephyr/samples/basic/blinky
+    xiao_mg24_build
+    xiao_mg24_flash
+
+Full factory flash (bootloader + app, e.g. after a brick):
+    xiao_mg24_flash_all
+
+Falling back to OpenOCD (e.g. pyocd probe issue):
+    xiao_mg24_flash_openocd
+    xiao_mg24_flash_all_openocd
+
+Build for a different board without touching the default:
+    xiao_mg24_build . some_other_board
+    xiao_mg24_flash . some_other_board
+    # builddir is implicitly ./build-some_other_board
+
+
+================================================================
+6. EDITING THE SCRIPT
+================================================================
+
+Because env_script.txt is appended into .mg24/bin/activate, a
+plain edit to env_script.txt has NO effect on an already
+activated shell. After editing:
+
+    # option A — re-append only the new/changed block manually
+    #            (cleanest once activate already has the old content)
+    $EDITOR ~/projects/temp/xiao_mg24/.mg24/bin/activate
+
+    # option B — wipe the appended section and re-append fresh
+    #            (use if many things changed at once)
+
+Then reload the venv:
+    deactivate
+    source ~/projects/temp/xiao_mg24/.mg24/bin/activate
+
+Verify what's loaded:
+    declare -F | grep xiao_mg24
+    type xiao_mg24_flash

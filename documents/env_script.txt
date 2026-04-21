@@ -1,0 +1,188 @@
+# --- Zephyr workspace ---
+export ZEPHYR_WORKSPACE_MG24="/Users/yogesh/projects/temp/xiao_mg24/zephyrproject"
+
+# --- OpenOCD fallback (Arduino-patched fork, only used by *_openocd helpers) ---
+export OPENOCD_MG24="/Users/yogesh/Library/Arduino15/packages/SiliconLabs/tools/openocd/0.12.0-arduino1-static/bin/openocd"
+export OPENOCD_SCRIPTS_MG24="/Users/yogesh/Library/Arduino15/packages/SiliconLabs/tools/openocd/0.12.0-arduino1-static/share/openocd/scripts"
+
+# Run west from the workspace, passing through args
+westz ()  { ( cd "$ZEPHYR_WORKSPACE_MG24" && west "$@" ); }
+
+# Default boards
+export MG24_BOARD_DEFAULT="xiao_mg24"
+
+
+# ============================================================
+# MG24
+# ============================================================
+xiao_mg24_build () {
+  local src="${1:-$PWD}"
+  local board="${2:-$MG24_BOARD_DEFAULT}"
+  local builddir="${src}/build-${board}"
+
+  echo "🧱 Building (MG24 + sysbuild)"
+  echo "  Source: $src"
+  echo "  Build:  $builddir"
+
+  westz build \
+    -p always \
+    --sysbuild \
+    -b "$board" \
+    -s "$src" \
+    -d "$builddir"
+}
+
+xiao_mg24_create_app () {
+  local name="$1"
+  local parent="${2:-$PWD}"
+
+  if [[ -z "$name" ]]; then
+    echo "Usage: xiao_mg24_create_app <app_name> [parent_dir]"
+    return 1
+  fi
+
+  local app_dir="${parent}/${name}"
+  if [[ -e "$app_dir" ]]; then
+    echo "❌ $app_dir already exists"
+    return 1
+  fi
+
+  echo "📦 Creating Zephyr app: $app_dir"
+  mkdir -p "$app_dir/src"
+
+  cat > "$app_dir/CMakeLists.txt" <<EOF
+cmake_minimum_required(VERSION 3.20.0)
+find_package(Zephyr REQUIRED HINTS \$ENV{ZEPHYR_BASE})
+project(${name})
+
+target_sources(app PRIVATE src/main.c)
+EOF
+
+  : > "$app_dir/prj.conf"
+
+  cat > "$app_dir/src/main.c" <<'EOF'
+int main(void)
+{
+    return 0;
+}
+EOF
+
+  cat > "$app_dir/.gitignore" <<'EOF'
+build*/
+EOF
+
+  echo "✅ Created $app_dir"
+  echo "   Next:"
+  echo "     cd \"$app_dir\" && xiao_mg24_build && xiao_mg24_flash"
+}
+
+xiao_mg24_flash () {
+  local src="${1:-$PWD}"
+  local board="${2:-$MG24_BOARD_DEFAULT}"
+  local builddir="${src}/build-${board}"
+
+  echo "🚀 Flashing application only (MG24, pyocd)"
+
+  [[ -d "$builddir" ]] || { echo "❌ Build directory not found: $builddir"; return 1; }
+
+  westz flash -d "$builddir" -r pyocd
+}
+
+xiao_mg24_flash_openocd () {
+  local src="${1:-$PWD}"
+  local board="${2:-$MG24_BOARD_DEFAULT}"
+  local builddir="${src}/build-${board}"
+
+  echo "🚀 Flashing application only (MG24, openocd fallback)"
+
+  [[ -d "$builddir" ]] || { echo "❌ Build directory not found: $builddir"; return 1; }
+
+  westz flash -d "$builddir" -r openocd -- \
+    --openocd "$OPENOCD_MG24" \
+    --openocd-search "$OPENOCD_SCRIPTS_MG24"
+}
+
+xiao_mg24_detect_app_domain () {
+  local builddir="$1"
+  find "$builddir" -maxdepth 1 -mindepth 1 -type d \
+    ! -name mcuboot ! -name zephyr ! -name sysbuild ! -name modules ! -name CMakeFiles ! -name _deps \
+    -exec test -d "{}/zephyr" \; -print \
+  | head -n1 | xargs -I{} basename "{}"
+}
+
+xiao_mg24_flash_all () {
+  local src="${1:-$PWD}"
+  local board="${2:-$MG24_BOARD_DEFAULT}"
+  local builddir="${src}/build-${board}"
+
+  echo "🏭 Factory flash (MCUboot + application, pyocd)"
+
+  [[ -d "$builddir" ]] || { echo "❌ Build directory not found: $builddir"; return 1; }
+
+  local app_domain
+  app_domain="$(xiao_mg24_detect_app_domain "$builddir")"
+  [[ -n "$app_domain" ]] || { echo "❌ Could not detect app domain"; return 1; }
+  echo "✅ App domain: $app_domain"
+
+  local merged_hex=""
+  for p in \
+    "$builddir/zephyr/merged.hex" \
+    "$builddir/$app_domain/zephyr/merged.hex" \
+    "$builddir/mcuboot/zephyr/merged.hex"
+  do
+    [[ -f "$p" ]] && merged_hex="$p" && break
+  done
+
+  if [[ -n "$merged_hex" ]]; then
+    echo "✅ Flashing merged image: $merged_hex"
+    westz flash --hex-file "$merged_hex" -r pyocd
+    return $?
+  fi
+
+  echo "⚠️ merged.hex not found, flashing MCUboot + $app_domain separately"
+
+  westz flash -d "$builddir" -r pyocd --domain mcuboot || return $?
+  westz flash -d "$builddir" -r pyocd --domain "$app_domain"
+}
+
+xiao_mg24_flash_all_openocd () {
+  local src="${1:-$PWD}"
+  local board="${2:-$MG24_BOARD_DEFAULT}"
+  local builddir="${src}/build-${board}"
+
+  echo "🏭 Factory flash (MCUboot + application, openocd fallback)"
+
+  [[ -d "$builddir" ]] || { echo "❌ Build directory not found: $builddir"; return 1; }
+
+  local app_domain
+  app_domain="$(xiao_mg24_detect_app_domain "$builddir")"
+  [[ -n "$app_domain" ]] || { echo "❌ Could not detect app domain"; return 1; }
+  echo "✅ App domain: $app_domain"
+
+  local merged_hex=""
+  for p in \
+    "$builddir/zephyr/merged.hex" \
+    "$builddir/$app_domain/zephyr/merged.hex" \
+    "$builddir/mcuboot/zephyr/merged.hex"
+  do
+    [[ -f "$p" ]] && merged_hex="$p" && break
+  done
+
+  if [[ -n "$merged_hex" ]]; then
+    echo "✅ Flashing merged image: $merged_hex"
+    westz flash --hex-file "$merged_hex" -r openocd -- \
+      --openocd "$OPENOCD_MG24" \
+      --openocd-search "$OPENOCD_SCRIPTS_MG24"
+    return $?
+  fi
+
+  echo "⚠️ merged.hex not found, flashing MCUboot + $app_domain separately"
+
+  westz flash -d "$builddir" -r openocd --domain mcuboot -- \
+    --openocd "$OPENOCD_MG24" \
+    --openocd-search "$OPENOCD_SCRIPTS_MG24" || return $?
+
+  westz flash -d "$builddir" -r openocd --domain "$app_domain" -- \
+    --openocd "$OPENOCD_MG24" \
+    --openocd-search "$OPENOCD_SCRIPTS_MG24"
+}
