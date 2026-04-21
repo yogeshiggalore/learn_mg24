@@ -69,10 +69,12 @@ Arguments:
 
 Creates:
     <parent_dir>/<app_name>/
-    ├── .gitignore         # build*/
-    ├── CMakeLists.txt     # project(<app_name>), one source file
-    ├── prj.conf           # empty (no features enabled)
-    └── src/main.c         # int main(void) { return 0; }
+    ├── .gitignore                  # build*/
+    ├── CMakeLists.txt              # project(<app_name>), one source file
+    ├── prj.conf                    # empty (no features enabled)
+    ├── boards/
+    │   └── xiao_mg24.overlay       # empty devicetree overlay stub
+    └── src/main.c                  # int main(void) { return 0; }
 
 Guardrails:
     * refuses to overwrite an existing path

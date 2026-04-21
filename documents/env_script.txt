@@ -48,7 +48,8 @@ xiao_mg24_create_app () {
   fi
 
   echo "📦 Creating Zephyr app: $app_dir"
-  mkdir -p "$app_dir/src"
+  mkdir -p "$app_dir/src" "$app_dir/boards"
+  : > "$app_dir/boards/${MG24_BOARD_DEFAULT}.overlay"
 
   cat > "$app_dir/CMakeLists.txt" <<EOF
 cmake_minimum_required(VERSION 3.20.0)
